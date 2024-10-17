@@ -1,18 +1,17 @@
-const { ClientSocket, SPacketMessage, SPacketLoginStart, SPacketPlayerPosLook, SPacketHeldItemChange, SPacketCloseWindow, SPacketRequestChunk, SPacketAnalytics, BitArray, SPacketRespawn$1, SPacketPing, PBVector3, SPacketUseEntity, SPacketClick, SPacketEntityAction, PBBlockPos, SPacketPlaceBlock, SPacketPlayerAction, SPacketUseItem, SPacketBreakBlock, SPacketClickWindow, SPacketConfirmTransaction, Vector3, SPacketTabComplete$1, PBItemStack } = require('./miniblox/main.js');
+const { ClientSocket, SPacketMessage, SPacketLoginStart, SPacketPlayerPosLook, SPacketHeldItemChange, SPacketCloseWindow, SPacketRequestChunk, SPacketAnalytics, SPacketRespawn$1, SPacketPing, PBVector3, SPacketUseEntity, SPacketClick, SPacketEntityAction, PBBlockPos, SPacketPlaceBlock, SPacketPlayerAction, SPacketUseItem, SPacketBreakBlock, SPacketClickWindow, SPacketConfirmTransaction, Vector3, SPacketTabComplete$1, SPacketPlayerAbilities } = require('./miniblox/main.js');
+const { convertToByte, convertAngle, clampToBox, convertServerPos, createChunk, getBlockIndex, translateItem, translateItemBack, translateText } = require('./miniblox/utils.js');
 const BLOCKS = require('./miniblox/blocks.js');
-const ITEMS = require('./miniblox/items.js');
 const ENTITIES = require('./miniblox/entities.js');
 const SKINS = require('./miniblox/skins.js');
 const GUIS = require('./miniblox/guis.js');
 const mc = require('minecraft-protocol');
 const fs = require('node:fs');
-const Chunk = require('prismarine-chunk')('1.8.9');
-const Vec3 = require('vec3');
 const server = mc.createServer({
 	'online-mode': false,
-	'motd': '\u00a76' + ' '.repeat(14) + 'Miniblox Translation Layer \u00a7c[1.8]\n\u00a7a' + ' '.repeat(21) + 'Made by 7GrandDad',
-	'favicon': 'data:image/png;base64,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',
-	'maxPlayers': 1,
+	motd: '\u00a76' + ' '.repeat(14) + 'Miniblox Translation Layer \u00a7c[1.8]\n\u00a7a' + ' '.repeat(21) + 'Made by 7GrandDad',
+	favicon: 'data:image/png;base64,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',
+	maxPlayers: 1,
+	keepAlive: false,
 	version: '1.8.9'
 });
 
@@ -20,47 +19,29 @@ let openShop = "";
 let connected = false;
 let clientId = -1;
 let mcClientId = 99999;
+let scoreData = [];
+
 let chunks = [];
 let queuedChunks = [];
-let lastLHP = [];
-let lStates = [];
-let playerUUIDs = {};
 let queuedSpawns = {};
 
 let players = [];
+let playerUUIDs = {};
 let playerPositions = {};
 let playerRotations = {};
 let playerGamemodes = {};
 let playerSkins = {};
-let pingInterval;
-let filteredPing = 0;
 
+let pingInterval, analyticsInterval;
+let filteredPing = 0;
 let ignoreInventory = false;
 let skipKick = Date.now();
-let lastLState = [];
-let scoreData = []
+let lStates = [];
+let lastLState = {};
+let lastLHP = [];
+let lastLFlying;
 
 const GAMEMODES = {"survival": 0, "creative": 1, "adventure": 2, "spectator": 3};
-const COLOR_CODES = {
-	"\\lime\\": "\u00a7a",
-	"\\aqua\\": "\u00a7b",
-	"\\red\\": "\u00a7c",
-	"\\pink\\": "\u00a7d",
-	"\\yellow\\": "\u00a7e",
-	"\\white\\": "\u00a7f",
-	"\\green\\": "\u00a72",
-	"\\orange\\": "\u00a76",
-	"\\gold\\": "\u00a76",
-	"\\gray\\": "\u00a77",
-	"\\grey\\": "\u00a77",
-	"\\silver\\": "\u00a77",
-	"\\blue\\": "\u00a79",
-	"\\black\\": "\u00a70",
-	"\\bold\\": "\u00a7l",
-	"\\italic\\": "\u00a7o",
-	"\\reset\\": "\u00a7r",
-	"\\glow\\": ""
-};
 const SLOTS = {
 	0: 36,
 	1: 37,
@@ -77,28 +58,104 @@ const SLOTS = {
 	39: 8
 };
 
-const VERSION = "3.35.41", CELL_VOLUME = 16 * 16 * 16;
-const DEG2RAD = Math.PI / 180, RAD2DEG = 180 / Math.PI;
+const VERSION = "3.35.46", DEG2RAD = Math.PI / 180, RAD2DEG = 180 / Math.PI;
+const viewDistance = 7;
 
-function translateText(text) {
-	for (const [code, color] of Object.entries(COLOR_CODES)) text = text.replaceAll(code, color);
-	return text;
+function checkQueued(client) {
+	for (const [id, packet] of Object.entries(queuedSpawns)) {
+		if (spawnEntity(packet, client)) delete queuedSpawns[id];
+	}
 }
 
-function convertServerPos(pos) {
-	return {x: pos.x / 32, y: pos.y / 32, z: pos.z / 32};
+function disconnect() {
+	if (pingInterval) clearInterval(pingInterval);
+	if (analyticsInterval) clearInterval(analyticsInterval);
+	connected = false;
+	clientId = -1;
+	scoreData = [];
+
+	chunks = [];
+	queuedChunks = [];
+	queuedSpawns = {};
+
+	players = [];
+	playerUUIDs = {};
+	playerPositions = {};
+	playerRotations = {};
+	playerGamemodes = {};
+	playerSkins = {};
+
+	ignoreInventory = false;
+	lStates = [];
+	lastLState = {};
+	lastLHP = [];
+	lastLFlying = undefined;
 }
 
-function clampToBox(pos, box) {
-	return [Math.min(Math.max(pos.x, box.x - 0.3), box.x + 0.3), Math.min(Math.max(pos.y + 1.62, box.y), box.y + 1.8), Math.min(Math.max(pos.z, box.z - 0.3), box.z + 0.3)]
+function isPlayerLoaded(id) {
+	return playerPositions[id] && chunks.includes([Math.floor((playerPositions[id].x / 32) / 16), Math.floor((playerPositions[id].z / 32) / 16)].join());
 }
 
-function updateChunks(x, z, client) {
+function purgePlayers(client) {
+	let newData = [];
+	for (const [_, uuid] of Object.entries(playerUUIDs)) {
+		newData.push({"UUID": uuid});
+		client.write('scoreboard_team', {
+			team: uuid.slice(0, 16),
+			mode: 1
+		});
+	}
+	client.write('player_info', {
+		action: 4,
+		data: newData
+	});
+}
+
+function spawnEntity(packet, client) {
+	if (playerUUIDs[packet.id] == undefined || playerPositions[packet.id] == undefined || playerGamemodes[packet.id] == GAMEMODES.spectator || !isPlayerLoaded(packet.id)) return;
+	if (players.includes(packet.id)) return;
+	players.push(packet.id);
+	client.write('named_entity_spawn', {
+		entityId: packet.id,
+		playerUUID: playerUUIDs[packet.id] ?? crypto.randomUUID(),
+		x: playerPositions[packet.id].x,
+		y: playerPositions[packet.id].y,
+		z: playerPositions[packet.id].z,
+		yaw: playerRotations[packet.id][0],
+		pitch: playerRotations[packet.id][1],
+		currentItem: 0,
+		metadata: []
+	});
+	return true;
+}
+
+function sendActions() {
+	if (playerPositions[mcClientId]) updateChunks(playerPositions[mcClientId].x, playerPositions[mcClientId].z);
+	if (clientId < 0) return;
+	const newStates = {punching: lStates[0] > Date.now(), sprinting: lStates[1] ?? false, sneak: lStates[2] ?? false};
+	if (newStates.punching == lastLState.punching && newStates.sprinting == lastLState.sprinting && newStates.sneak == lastLState.sneak) return;
+	ClientSocket.sendPacket(new SPacketEntityAction({
+		id: clientId,
+		punching: newStates.punching != lastLState.punching ? newStates.punching : undefined,
+		sprinting: newStates.sprinting != lastLState.sprinting ? newStates.sprinting : undefined,
+		sneak: newStates.sneak != lastLState.sneak ? newStates.sneak : undefined
+	}));
+	lastLState = newStates;
+}
+
+function sendAbilities() {
+	const newState = false;
+	if (newState == lastLFlying) return;
+	ClientSocket.sendPacket(new SPacketPlayerAbilities({isFlying: newState}));
+	lastLFlying = newState;
+}
+
+function updateChunks(x, z) {
 	const positions = [];
 	const currentlyLoaded = [];
 
-	for (let checkX = -7; checkX < 7; checkX++) {
-		for (let checkZ = -7; checkZ < 7; checkZ++) {
+	for (let checkX = -viewDistance; checkX < viewDistance; checkX++) {
+		for (let checkZ = -viewDistance; checkZ < viewDistance; checkZ++) {
 			const pos = [Math.floor(x / 16) + checkX, Math.floor(z / 16) + checkZ];
 			currentlyLoaded.push(pos.join());
 			if (chunks.includes(pos.join()) || queuedChunks.includes(pos.join())) continue;
@@ -123,188 +180,13 @@ function updateChunks(x, z, client) {
 
 	for (const chunk of chunks) {
 		if (!currentlyLoaded.includes(chunk)) {
-			const split = chunk.split(',');
-			const cX = Number.parseInt(split[0]), cZ = Number.parseInt(split[1]);
-			client.write('map_chunk', {
-				x: cX,
-				z: cZ,
-				groundUp: true,
-				bitMap: 0,
-				chunkData: []
-			});
 			chunks.splice(chunks.indexOf(chunk), 1);
-			break;
 		}
 	}
 }
 
-function getBlockIndex(x, y, z) {
-	return (y & 15) << 8 | (z & 15) << 4 | x & 15
-}
-
-function createChunk(packet) {
-	const chunk = new Chunk();
-	for (const cell of packet.cells) {
-		const array = new BitArray(CELL_VOLUME, cell.bitsPerEntry, cell.bitArray);
-		if (!array) continue;
-		for (let x = 0; x < 16; x++) {
-			for (let z = 0; z < 16; z++) {
-				for (let skyY = 0; skyY < 256; skyY++) {
-					chunk.setSkyLight(new Vec3(x, skyY, z), 15);
-				}
-				for (let y = 0; y < 16; y++) {
-						const offset = array.get(getBlockIndex(x, y, z));
-						if (offset == 0 || cell.palette.length <= 0) continue;
-						const blockdata = BLOCKS[cell.palette[offset]] ?? BLOCKS[9];
-						chunk.setBlockType(new Vec3(x, cell.y + y, z), typeof blockdata == 'number' ? blockdata : blockdata[0]);
-						chunk.setBlockData(new Vec3(x, cell.y + y, z), typeof blockdata == 'number' ? 0 : blockdata[1]);
-				}
-			}
-		}
-	}
-	return chunk;
-}
-
-function translateItem(item) {
-	let data;
-	if (item.data) {
-		let parsed = JSON.parse(item.data);
-		if (parsed.ench) {
-			let enchants = [];
-			for (const ench of parsed.ench) {
-				enchants.push({lvl: {type: "short", value: ench.lvl}, id: {type: "short", value: ench.id}});
-			}
-			data = {
-				name: "",
-				type: "compound",
-				value: {
-					ench: {
-						type: "list",
-						value: {
-							type: "compound",
-							value: enchants
-						}
-					}
-				}
-			};
-		}
-	}
-
-	const itemData = item.present && (ITEMS[item.id] ?? 166);
-	return item.present ? {
-		blockId: typeof itemData == 'number' ? itemData : itemData[0],
-		itemCount: item.stackSize,
-		itemDamage: (typeof itemData == 'number' ? item.durability : itemData[1]),
-		nbtData: data
-	} : {blockId: -1}
-}
-
-function translateItemBack(item) {
-	let itemId;
-	let data = void 0;
-	for (const [mini, mc] of Object.entries(ITEMS)) {
-		const compared = typeof mc == 'number' ? mc : mc[0];
-		if (item.blockId === compared && item != 166) {
-			itemId = Number.parseInt(mini);
-			break;
-		}
-	}
-
-	if (item.nbtData && item.nbtData.value.ench) {
-		data = {ench: []};
-		for (const ench of item.nbtData.value.ench.value.value) {
-			data.ench.push({id: ench.id.value, lvl: ench.lvl.value});
-		}
-		data = JSON.stringify(data);
-	}
-
-	return itemId != undefined ? new PBItemStack({
-		present: true,
-		id: itemId,
-		stackSize: item.itemCount,
-		durability: Math.floor(item.itemDamage),
-		data: data
-	}) : new PBItemStack({present: false});
-}
-
-function purgePlayers(client) {
-	let newData = [];
-	for (const [_, uuid] of Object.entries(playerUUIDs)) {
-		newData.push({"UUID": uuid});
-		client.write('scoreboard_team', {
-			team: uuid.slice(0, 16),
-			mode: 1
-		});
-	}
-	client.write('player_info', {
-		action: 4,
-		data: newData
-	});
-}
-
-// datapacket has a brain issue
-function convertToByte(num) {
-	num &= 0xFF;
-	num = num > 127 ? num - 256 : num;
-	return num;
-}
-
-function convertAngle(ang, num) {
-	ang = ang / 256 * Math.PI * 2;
-	ang = (((ang * -1) * RAD2DEG) - (num != undefined ? num : 0)) * 256 / 360;
-	return convertToByte(ang);
-}
-
-function spawnEntity(packet, client) {
-	if (playerUUIDs[packet.id] == undefined || playerPositions[packet.id] == undefined) return;
-	if (playerGamemodes[packet.id] == GAMEMODES.spectator) return;
-	if (players.includes(packet.id)) return;
-	players.push(packet.id);
-	client.write('named_entity_spawn', {
-		entityId: packet.id,
-		playerUUID: playerUUIDs[packet.id] ?? crypto.randomUUID(),
-		x: playerPositions[packet.id].x,
-		y: playerPositions[packet.id].y,
-		z: playerPositions[packet.id].z,
-		yaw: playerRotations[packet.id][0],
-		pitch: playerRotations[packet.id][1],
-		currentItem: 0,
-		metadata: []
-	});
-}
-
-function sendActions(client) {
-	if (playerPositions[mcClientId]) updateChunks(playerPositions[mcClientId].x, playerPositions[mcClientId].z, client);
-	const newStates = {punching: lStates[0] > Date.now(), sprinting: lStates[1], sneak: lStates[2]};
-	if (newStates.punching == lastLState.punching && newStates.sprinting == lastLState.sprinting && newStates.sneak == lastLState.sneak) return;
-	ClientSocket.sendPacket(new SPacketEntityAction({
-		id: clientId,
-		punching: newStates.punching != lastLState.punching ? newStates.punching : undefined,
-		sprinting: newStates.sprinting != lastLState.sprinting ? newStates.sprinting : undefined,
-		sneak: newStates.sneak != lastLState.sneak ? newStates.sneak : undefined
-	}));
-	lastLState = newStates;
-}
-
-function disconnect() {
-	if (pingInterval) clearInterval(pingInterval);
-	filteredPing = 0;
-	connected = false;
-	clientId = -1;
-	ignoreInventory = false;
-	chunks = [];
-	queuedChunks = [];
-	lastLHP = [];
-	lStates = [];
-	playerUUIDs = {};
-	queuedSpawns = {};
-	players = [];
-	playerPositions = {};
-	playerRotations = {};
-	playerGamemodes = {};
-	playerSkins = {};
-	lastLState = [];
-	scoreData = [];
+function uuid$1() {
+	return "10000000-1000-4000-8000-100000000000".replace(/[018]/g, j => (j ^ crypto.getRandomValues(new Uint8Array(1))[0] & 15 >> j / 4).toString(16))
 }
 
 async function connect(client, requeue, gamemode) {
@@ -367,7 +249,7 @@ async function connect(client, requeue, gamemode) {
 			requestedUuid: void 0,
 			session: session,
 			hydration: "0",
-			metricsId: "",
+			metricsId: uuid$1(),
 			clientVersion: VERSION
 		}));
 	});
@@ -379,28 +261,23 @@ async function connect(client, requeue, gamemode) {
 		if (requeue) return;
 		client.write('login', {
 			entityId: mcClientId,
-			levelType: "default",
 			gameMode: GAMEMODES[packet.gamemode ?? "survival"],
-			previousGameMode: -1,
-			worldNames: ["world"],
-			dimensionCodec: 0,
-			worldName: "world",
 			dimension: 0,
-			hashedSeed: [0, 0],
 			difficulty: 2,
-			viewDistance: 10,
-			reducedDebugInfo: false,
 			maxPlayers: server.maxPlayers,
-			enableRespawnScreen: true,
-			isDebug: false,
-			isFlat: true
+			levelType: "default",
+			reducedDebugInfo: false
 		});
 
 		pingInterval = setInterval(() => {
-			ClientSocket.sendPacket(new SPacketPing({
-				time: BigInt(Date.now())
+			client.write('keep_alive', Math.floor(Math.random() * 10000));
+		}, 1000);
+		analyticsInterval = setInterval(() => {
+			ClientSocket.sendPacket(new SPacketAnalytics({
+				fps: 60 - Math.random(),
+				ping: filteredPing
 			}));
-		}, 3000);
+		}, 30000);
 	});
 
 	// MINIBLOX SERVER
@@ -440,6 +317,7 @@ async function connect(client, requeue, gamemode) {
 			bitMap: chunk.getMask(),
 			chunkData: chunk.dump()
 		});
+		checkQueued(client);
 	});
 	ClientSocket.on("CPacketCloseWindow", packet => client.write('close_window', {windowId: packet.windowId}));
 	ClientSocket.on("CPacketConfirmTransaction", packet => {
@@ -648,12 +526,7 @@ async function connect(client, requeue, gamemode) {
 		}
 	});
 	ClientSocket.on("CPacketPong", packet => {
-		let timetaken = Math.max(Date.now() - Number(packet.time), 1);
-		filteredPing += (timetaken - filteredPing) / 3;
-		ClientSocket.sendPacket(new SPacketAnalytics({
-			fps: 0,
-			ping: filteredPing
-		}));
+		filteredPing += (Math.max(Date.now() - Number(packet.time), 1) - filteredPing) / 3;
 	});
 	ClientSocket.on("CPacketOpenShop", packet => {
 		const gui = GUIS[packet.type];
@@ -736,13 +609,7 @@ async function connect(client, requeue, gamemode) {
 			action: 0,
 			data: newData
 		});
-
-		for (const [id, packet] of Object.entries(queuedSpawns)) {
-			if (playerUUIDs[id]) {
-				delete queuedSpawns[id];
-				spawnEntity(packet, client);
-			}
-		}
+		checkQueued(client);
 	});
 	ClientSocket.on("CPacketPlayerPosLook", packet => {
 		if (isNaN(packet.x) || isNaN(packet.y) || isNaN(packet.z) || isNaN(packet.yaw) || isNaN(packet.pitch)) {
@@ -750,7 +617,6 @@ async function connect(client, requeue, gamemode) {
 			return
 		}
 
-		queuedChunks = [];
 		client.write('position', {
 			x: packet.x,
 			y: packet.y,
@@ -761,14 +627,13 @@ async function connect(client, requeue, gamemode) {
 		});
 	});
 	ClientSocket.on("CPacketPlayerPosition", packet => {
-		queuedChunks = [];
 		client.write('position', {
 			x: packet.x,
 			y: packet.y,
 			z: packet.z,
 			yaw: 0,
 			pitch: 0,
-			flags: 0x00
+			flags: 24
 		});
 	});
 	ClientSocket.on("CPacketQueueNext", packet => connect(client, true, packet.minigameId));
@@ -904,11 +769,10 @@ async function connect(client, requeue, gamemode) {
 				});
 			}
 
-			if (playerUUIDs[packet.id] == undefined) {
+			if (!spawnEntity(packet, client)) {
 				queuedSpawns[packet.id] = packet;
 				return;
 			}
-			spawnEntity(packet, client);
 
 			if (specialEntity) {
 				client.write('player_info', {
@@ -923,12 +787,12 @@ async function connect(client, requeue, gamemode) {
 		client.write('title', {
 			action: 2,
 			fadeIn: 6,
-			stay: packet.duration / 20,
+			stay: Math.floor(packet.duration / 50),
 			fadeOut: 6
 		});
 		client.write('title', {
 			action: 0,
-			text: packet.title
+			text: JSON.stringify({text: translateText(packet.title)})
 		});
 	});
 	ClientSocket.on("CPacketUpdateHealth", packet => {
@@ -973,8 +837,8 @@ async function connect(client, requeue, gamemode) {
 				}
 
 				if (playerPositions[packet.id] != undefined) {
-					delete queuedSpawns[packet.id];
 					if (playerGamemodes[packet.id] == GAMEMODES.spectator) {
+						delete queuedSpawns[packet.id];
 						if (players.includes(packet.id)) {
 							players.splice(players.indexOf(packet.id), 1);
 							client.write('entity_destroy', {
@@ -982,13 +846,7 @@ async function connect(client, requeue, gamemode) {
 							});
 						}
 					} else {
-						spawnEntity({
-							id: packet.id,
-							yaw: playerRotations[packet.id][0],
-							pitch: playerRotations[packet.id][1],
-							cosmetics: {skin: playerSkins[packet.id]},
-							gamemode: packet.mode
-						}, client);
+						if (spawnEntity({id: packet.id}, client)) delete queuedSpawns[packet.id];
 					}
 				}
 			}
@@ -1032,22 +890,26 @@ server.on('playerJoin', async function(client) {
 
 	// MINECRAFT SERVER
 	client.on('flying', ({ onGround } = {}) => {
-		sendActions(client);
+		sendActions();
 		ClientSocket.sendPacket(new SPacketPlayerPosLook({onGround: onGround}));
+		sendAbilities();
 	});
 	client.on('position', ({ x, y, z, onGround } = {}) => {
 		playerPositions[mcClientId] = {x: x, y: y, z: z};
-		sendActions(client);
+		sendActions();
 		ClientSocket.sendPacket(new SPacketPlayerPosLook({pos: {x: x, y: y, z: z}, onGround: onGround}));
+		sendAbilities();
 	});
 	client.on('look', ({ yaw, pitch, onGround } = {}) => {
-		sendActions(client);
+		sendActions();
 		ClientSocket.sendPacket(new SPacketPlayerPosLook({yaw: ((yaw * -1) - 180) * DEG2RAD, pitch: (pitch * -1) * DEG2RAD, onGround: onGround}));
+		sendAbilities();
 	});
 	client.on('position_look', ({ x, y, z, onGround, yaw, pitch } = {}) => {
 		playerPositions[mcClientId] = {x: x, y: y, z: z};
-		sendActions(client);
+		sendActions();
 		ClientSocket.sendPacket(new SPacketPlayerPosLook({pos: {x: x, y: y, z: z}, yaw: ((yaw * -1) - 180) * DEG2RAD, pitch: (pitch * -1) * DEG2RAD, onGround: onGround}));
+		sendAbilities();
 	});
 	client.on('chat', packet => {
 		if (packet.message.toLocaleLowerCase().startsWith("/queue") || packet.message.toLocaleLowerCase().startsWith("/play")) {
@@ -1067,7 +929,8 @@ server.on('playerJoin', async function(client) {
 		ClientSocket.sendPacket(new SPacketMessage({text: packet.message}));
 	});
 	client.on('tab_complete', packet => {
-		if (packet.text.startsWith("/queue") || packet.text.startsWith("/play")) {
+		if ((packet.text.startsWith("/queue") || packet.text.startsWith("/play")) && packet.text.indexOf(" ") != -1) {
+			const split = packet.text.split(" ")[1].toLocaleLowerCase();
 			client.write('tab_complete', {
 				matches: [
 					"skywars", "eggwars",
@@ -1076,7 +939,7 @@ server.on('playerJoin', async function(client) {
 					"parkour", "oitq",
 					"kitpvp", "blitzbuild", "murder",
 					"pvp"
-				]
+				].filter((str) => str.substring(0, split.length) == split)
 			});
 			return;
 		}
@@ -1185,6 +1048,9 @@ server.on('playerJoin', async function(client) {
 			transactionId: packet.action
 		}));
 	});
+	client.on('keep_alive', packet => {
+		if (packet.keepAliveId > 0) ClientSocket.sendPacket(new SPacketPing({time: BigInt(Date.now())}));
+	});
 	client.on('transaction', packet => {
 		ClientSocket.sendPacket(new SPacketConfirmTransaction({
 			windowId: packet.windowId,
@@ -1192,7 +1058,7 @@ server.on('playerJoin', async function(client) {
 			accepted: packet.accepted
 		}));
 	});
-	client.on('close_window', packet => ClientSocket.sendPacket(new SPacketCloseWindow({windowId: packet.windowId})));
+	client.on('close_window', packet => ClientSocket.sendPacket(new SPacketCloseWindow({windowId: packet.windowId == 255 ? 1 : packet.windowId})));
 
 	await connect(client);
 	connected = true;
