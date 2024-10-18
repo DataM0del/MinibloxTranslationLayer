@@ -2914,6 +2914,7 @@ const CPacketRespawn = class extends Message {
 		super();
 		ut(this, "notDeath");
 		ut(this, "client");
+		ut(this, "dimension");
 		proto2.util.initPartial($, this)
 	}
 	static fromBinary($, et) {
@@ -2943,6 +2944,12 @@ ut(CPacketRespawn, "fields", proto2.util.newFieldList(()=>[{
 	name: "client",
 	kind: "scalar",
 	T: 8,
+	opt: !0
+}, {
+	no: 3,
+	name: "dimension",
+	kind: "scalar",
+	T: 5,
 	opt: !0
 }]));
 const CPacketScoreboard = class extends Message {
@@ -5547,7 +5554,8 @@ exports.ClientSocket = class {
 		this.socket = io(_, {
 			transports: ["websocket"],
 			extraHeaders: {
-				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64; rv:131.0) Gecko/20100101 Firefox/131.0'
+				'Origin': 'https://miniblox.io',
+				'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/129.0.0.0 Safari/537.36 Edg/129.0.0.0'
 			},
 			autoConnect: !1,
 			forceNew: !0,
