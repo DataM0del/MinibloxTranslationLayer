@@ -1,10 +1,11 @@
 const { ClientSocket, SPacketMessage, SPacketLoginStart, SPacketPlayerPosLook, SPacketHeldItemChange, SPacketCloseWindow, SPacketRequestChunk, SPacketAnalytics, SPacketRespawn$1, SPacketPing, PBVector3, SPacketUseEntity, SPacketClick, SPacketEntityAction, PBBlockPos, SPacketPlaceBlock, SPacketPlayerAction, SPacketUseItem, SPacketBreakBlock, SPacketClickWindow, SPacketConfirmTransaction, Vector3, SPacketTabComplete$1, SPacketPlayerAbilities } = require('./miniblox/main.js');
-const { convertToByte, convertAngle, clampToBox, convertServerPos, createChunk, getBlockIndex, translateItem, translateItemBack, translateText } = require('./miniblox/utils.js');
+const { convertToByte, convertAngle, clampByte, clampToBox, convertServerPos, createChunk, translateItem, translateItemBack, translateText } = require('./miniblox/utils.js');
 const BLOCKS = require('./miniblox/blocks.js');
 const ENTITIES = require('./miniblox/entities.js');
 const SKINS = require('./miniblox/skins.js');
 const GUIS = require('./miniblox/guis.js');
 const mc = require('minecraft-protocol');
+const ws = require('ws');
 const fs = require('node:fs');
 const server = mc.createServer({
 	'online-mode': false,
@@ -13,6 +14,9 @@ const server = mc.createServer({
 	maxPlayers: 1,
 	keepAlive: false,
 	version: '1.8.9'
+});
+const wsServer = new ws.Server({
+	port: 6874
 });
 
 let openShop = "";
@@ -28,7 +32,7 @@ let entities = {};
 let playerUUIDs = {};
 let playerSkins = {};
 
-let pingInterval, analyticsInterval;
+let pingInterval, analyticsInterval, lastTeleport;
 let filteredPing = 0;
 let ignoreInventory = false;
 let skipKick = Date.now();
@@ -54,8 +58,9 @@ const SLOTS = {
 	38: 7,
 	39: 8
 };
+const WINDOW_NAMES = {'Chest': '{"translate":"container.chest"}', 'Double Chest': '{"translate":"container.doublechest"}', 'Ender Chest': '{"translate":"container.enderchest"}'};
 
-const VERSION = "3.35.50", DEG2RAD = Math.PI / 180, RAD2DEG = 180 / Math.PI;
+const VERSION = "3.35.52", DEG2RAD = Math.PI / 180, RAD2DEG = 180 / Math.PI;
 const viewDistance = 7;
 
 function canSpawn(entity) {
@@ -97,6 +102,7 @@ function disconnect() {
 	playerSkins = {};
 
 	ignoreInventory = false;
+	lastTeleport = undefined;
 	lStates = [];
 	lastLState = {};
 	lastLHP = [];
@@ -152,6 +158,10 @@ function spawnEntity(entity, client) {
 			currentItem: 0,
 			metadata: entity.metadata
 		});
+		client.write('entity_head_rotation', {
+			entityId: entity.id,
+			headYaw: entity.yaw
+		});
 
 		for (const [slot, item] of Object.entries(entity.equipment)) {
 			client.write('entity_equipment', {
@@ -191,6 +201,27 @@ function spawnEntity(entity, client) {
 
 	return true;
 }
+
+let promise;
+let sockets = [];
+wsServer.on('connection', function(socket) {
+	if (sockets.length > 0) {
+		socket.terminate();
+		return;
+	}
+	sockets.push(socket);
+
+	socket.on('message', function(msg) {
+		if (promise) {
+			promise(msg.toString('utf8'));
+			promise = undefined;
+		}
+	});
+
+	socket.on('close', function() {
+		sockets = sockets.filter(s => s !== socket);
+	});
+});
 
 async function queue(gamemode, server) {
 	if (server) return {ok: true, json: function() { return {serverId: server}; }};
@@ -346,13 +377,25 @@ async function connect(client, requeue, gamemode, code) {
 
 	// MINIBLOX CONNECTION
 	ClientSocket.once("connect", () => {
-		ClientSocket.sendPacket(new SPacketLoginStart({
-			requestedUuid: void 0,
-			session: session,
-			hydration: "0",
-			metricsId: uuid$1(),
-			clientVersion: VERSION
-		}));
+		ClientSocket.once("CPacketSessionToken", async packet => {
+			if (sockets.length <= 0) {
+				client.end('Missing tampermonkey middleman, please check to ensure the script is running.');
+				return;
+			}
+			sockets.forEach(s => s.send('request|' + packet.token));
+			const captchaToken = await new Promise((resolve) => {
+				promise = resolve;
+			});
+			ClientSocket.sendPacket(new SPacketLoginStart({
+				requestedUuid: void 0,
+				session: session,
+				hydration: "0",
+				metricsId: uuid$1(),
+				clientVersion: VERSION,
+				recaptchaToken: captchaToken,
+				sessionToken: packet.token
+			}));
+		});
 	});
 	ClientSocket.once("CPacketJoinGame", packet => {
 		disconnect();
@@ -445,6 +488,16 @@ async function connect(client, requeue, gamemode, code) {
 				animation: 0
 			});
 		}
+
+		const entity = entities[packet.id];
+		if (entity && packet.sneak != undefined) {
+			entity.sneaking = packet.sneak;
+			entity.metadata[0].value = entity.sneaking ? (entity.metadata[0].value | 1 << 1) : (entity.metadata[0].value & ~(1 << 1));
+			client.write('entity_metadata', {
+				entityId: packet.id,
+				metadata: [{key: 0, value: entity.metadata[0].value, type: 0}]
+			});
+		}
 	});
 	ClientSocket.on("CPacketEntityEffect", packet => {
 		client.write('entity_effect', {
@@ -479,6 +532,7 @@ async function connect(client, requeue, gamemode, code) {
 					if (watched.dataValueId != 7 && (watched.dataValueId != 18 || entity && entity.type != -1)) {
 						wType = 0;
 						value = watched.dataValueId == 10 ? 127 : convertToByte(watched.intValue);
+						if (watched.dataValueId == 0 && entity) value = entity.sneaking ? (value | 1 << 1) : (value & ~(1 << 1));
 					}
 					if (watched.dataValueId == 1) {
 						wType = 1;
@@ -507,7 +561,11 @@ async function connect(client, requeue, gamemode, code) {
 			props.push({key: watched.dataValueId, value: value, type: wType});
 		}
 
-		if (entity) entity.metadata = props;
+		if (entity) {
+			for (const prop of props) {
+				entity.metadata[prop.key] = prop;
+			}
+		}
 		client.write('entity_metadata', {
 			entityId: packet.id == clientId ? mcClientId : packet.id,
 			metadata: props
@@ -517,11 +575,12 @@ async function connect(client, requeue, gamemode, code) {
 		const entity = entities[packet.id];
 		if (entity) {
 			entity.pos = {x: packet.pos.x, y: packet.pos.y, z: packet.pos.z};
-			entity.yaw = convertAngle(packet.yaw, entity.type == -1 ? 180 : 0);
+			entity.yaw = convertAngle(packet.yaw, false, entity.type == -1 ? 180 : 0);
 			entity.pitch = convertAngle(packet.pitch);
 		} else {
 			return;
 		}
+
 		client.write('entity_teleport', {
 			entityId: packet.id,
 			x: packet.pos.x,
@@ -538,7 +597,7 @@ async function connect(client, requeue, gamemode, code) {
 	});
 	ClientSocket.on("CPacketEntityRelPositionAndRotation", packet => {
 		const entity = entities[packet.id];
-		const yaw = packet.yaw != undefined ? convertAngle(packet.yaw, (!entity || entity.type == -1) ? 180 : 0) : 0;
+		const yaw = packet.yaw != undefined ? convertAngle(packet.yaw, false, (!entity || entity.type == -1) ? 180 : 0) : 0;
 		const pitch = packet.pitch != undefined ? convertAngle(packet.pitch) : 0;
 		if (entity) {
 			if (packet.yaw != undefined || packet.pitch != undefined) {
@@ -555,9 +614,9 @@ async function connect(client, requeue, gamemode, code) {
 		if (packet.pos && (packet.yaw != undefined || packet.pitch != undefined)) {
 			client.write('entity_move_look', {
 				entityId: packet.id,
-				dX: convertToByte(packet.pos.x),
-				dY: convertToByte(packet.pos.y),
-				dZ: convertToByte(packet.pos.z),
+				dX: clampByte(packet.pos.x),
+				dY: clampByte(packet.pos.y),
+				dZ: clampByte(packet.pos.z),
 				yaw: yaw,
 				pitch: pitch,
 				onGround: packet.onGround
@@ -565,9 +624,9 @@ async function connect(client, requeue, gamemode, code) {
 		} else if (packet.pos) {
 			client.write('rel_entity_move', {
 				entityId: packet.id,
-				dX: convertToByte(packet.pos.x),
-				dY: convertToByte(packet.pos.y),
-				dZ: convertToByte(packet.pos.z),
+				dX: clampByte(packet.pos.x),
+				dY: clampByte(packet.pos.y),
+				dZ: clampByte(packet.pos.z),
 				onGround: packet.onGround
 			});
 		} else {
@@ -663,11 +722,11 @@ async function connect(client, requeue, gamemode, code) {
 		}
 	});
 	ClientSocket.on("CPacketOpenWindow", packet => {
-		if (packet.guiID === "chest") {
+		if (packet.guiID == "chest" || packet.guiID == "container") {
 			client.write('open_window', {
 				windowId: packet.windowId,
 				inventoryType: "minecraft:container",
-				windowTitle: packet.title,
+				windowTitle: WINDOW_NAMES[packet.title] ?? packet.title.replaceAll(' ', ''),
 				slotCount: packet.size,
 				entityId: mcClientId
 			});
@@ -727,6 +786,7 @@ async function connect(client, requeue, gamemode, code) {
 			return
 		}
 
+		lastTeleport = packet;
 		client.write('position', {
 			x: packet.x,
 			y: packet.y,
@@ -831,8 +891,8 @@ async function connect(client, requeue, gamemode, code) {
 			id: packet.id,
 			type: packet.type,
 			pos: packet.pos,
-			yaw: convertAngle(packet.yaw),
-			pitch: convertAngle(packet.pitch),
+			yaw: convertAngle(packet.yaw, true),
+			pitch: convertAngle(packet.pitch, true),
 			metadata: {},
 			equipment: {},
 			objectData: {
@@ -855,25 +915,53 @@ async function connect(client, requeue, gamemode, code) {
 		});
 	});
 	ClientSocket.on("CPacketSpawnPlayer", packet => {
+		const yaw = convertAngle(packet.yaw, true, 180), pitch = convertAngle(packet.pitch, true);
 		if (packet.socketId == ClientSocket.id) {
 			delete playerGamemodes[packet.id];
 			clientId = packet.id;
 			lastLHP = [];
+			client.write('position', {
+				x: packet.pos.x,
+				y: packet.pos.y,
+				z: packet.pos.z,
+				yaw: yaw,
+				pitch: pitch,
+				flags: 0x00
+			});
 		} else {
 			playerGamemodes[packet.id] = GAMEMODES[packet.gamemode ?? "survival"];
 			playerSkins[packet.id] = packet.cosmetics.skin;
+			const entity = entities[packet.id];
+
+			if (entity && entity.spawned) {
+				client.write('entity_teleport', {
+					entityId: packet.id,
+					x: packet.pos.x * 32,
+					y: packet.pos.y * 32,
+					z: packet.pos.z * 32,
+					yaw: yaw,
+					pitch: pitch,
+					onGround: packet.onGround
+				});
+				client.write('entity_head_rotation', {
+					entityId: packet.id,
+					headYaw: yaw
+				});
+			}
+
 			entities[packet.id] = {
 				id: packet.id,
 				type: -1,
 				special: packet.name && packet.name.includes(" "),
 				pos: {x: packet.pos.x * 32, y: packet.pos.y * 32, z: packet.pos.z * 32},
-				yaw: convertAngle(packet.yaw, 180),
-				pitch: convertAngle(packet.pitch),
-				metadata: {},
-				equipment: {},
-				spawned: entities[packet.id] ? entities[packet.id].spawned : false,
+				yaw: yaw,
+				pitch: pitch,
+				metadata: entity ? entity.metadata : {},
+				equipment: entity ? entity.equipment : {},
+				spawned: entity ? entity.spawned : false,
 				name: packet.name
 			};
+
 			checkEntity(entities[packet.id], client);
 		}
 	});
@@ -1015,6 +1103,19 @@ server.on('playerJoin', async function(client) {
 		} else if (msg.startsWith("/join")) {
 			connect(client, true, undefined, msg.split(" ")[1] ?? "");
 			return;
+		} else if (msg.startsWith('/resync')) {
+			if (lastTeleport) {
+				client.write('position', {
+					x: lastTeleport.x,
+					y: lastTeleport.y,
+					z: lastTeleport.z,
+					yaw: (((lastTeleport.yaw * -1) * RAD2DEG) - 180),
+					pitch: (lastTeleport.pitch * -1) * RAD2DEG,
+					flags: 0x00
+				});
+				client.write('chat', {message: JSON.stringify({text: translateText('\\green\\Resynced!')})});
+			}
+			return;
 		}
 		ClientSocket.sendPacket(new SPacketMessage({text: packet.message}));
 	});
@@ -1155,3 +1256,4 @@ server.on('playerJoin', async function(client) {
 });
 
 console.log('\x1b[33mMiniblox Translation Layer Started!\nDeveloped & maintained by 7GrandDad (https://youtube.com/c/7GrandDadVape)\nVersion: ' + VERSION + '\x1b[0m');
+console.log('\x1b[36m[*] Hosting websocket on 6874...\x1b[0m');
