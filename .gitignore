@@ -4,3 +4,6 @@ miniblox/1.8blockstates.txt
 recaptcha.token
 miniblox/minibloxblockstates.txt
 package-lock.json
+# proxy files
+proxies/*
+!proxies/ReadME.md
