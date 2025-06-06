@@ -11,7 +11,7 @@ const server = createServer({
 	keepAlive: false,
 	version: '1.8.9'
 });
-const VERSION = '3.41.20';
+const VERSION = '3.41.27';
 const DEFAULT_GAMEMODE = "skywars";
 let connected, skipKick = Date.now();
 
